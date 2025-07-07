@@ -9,6 +9,7 @@ import java.util.Optional;
 
 public interface InversionRepository extends MongoRepository<Inversion, String> {
     List<Inversion> findByUsuarioId(String usuarioId);
+    Optional<Inversion> findByIdAndUsuarioEmail(String id, String email);
     Optional<Inversion> findByIdAndUsuarioId(String id, String usuarioId);
     List<Inversion> findByUsuarioIdAndFechaInversionBetween(
         String usuarioId, 
