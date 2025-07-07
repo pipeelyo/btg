@@ -67,20 +67,23 @@ public class InversionService {
     }
 
     public List<InversionResponse> obtenerInversionesPorUsuario(String usuarioId) {
-        return inversionRepository.findByUsuarioId(usuarioId).stream()
+        Usuario usuario = usuarioRepository.findByEmail(usuarioId).orElseThrow(() -> new RuntimeException("Usuario no encontrado"));
+        return inversionRepository.findByUsuarioId(usuario.getId()).stream()
                 .map(InversionResponse::fromEntity)
                 .collect(Collectors.toList());
     }
 
     public InversionResponse obtenerInversionPorIdYUsuario(String id, String usuarioId) {
-        Inversion inversion = inversionRepository.findByIdAndUsuarioId(id, usuarioId)
+        Usuario usuario = usuarioRepository.findByEmail(usuarioId).orElseThrow(() -> new RuntimeException("Usuario no encontrado"));
+        Inversion inversion = inversionRepository.findByIdAndUsuarioId(id, usuario.getId())
                 .orElseThrow(() -> new RuntimeException("Inversión no encontrada"));
         return InversionResponse.fromEntity(inversion);
     }
 
     @Transactional
     public InversionResponse liquidarInversion(String id, String usuarioId) {
-        Inversion inversion = inversionRepository.findByIdAndUsuarioId(id, usuarioId)
+        Usuario usuario = usuarioRepository.findByEmail(usuarioId).orElseThrow(() -> new RuntimeException("Usuario no encontrado"));
+        Inversion inversion = inversionRepository.findByIdAndUsuarioId(id, usuario.getId()) 
                 .orElseThrow(() -> new RuntimeException("Inversión no encontrada"));
         
         if (inversion.getEstado() != Inversion.EstadoInversion.ACTIVA) {

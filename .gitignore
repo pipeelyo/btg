@@ -31,3 +31,8 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Logback ###
+logs/
+.DS_Store
+

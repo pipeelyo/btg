@@ -35,7 +35,7 @@ public class SuscripcionService {
     public Inversion suscribirAFondo(SuscripcionFondoRequest request) {
         // Obtener el usuario autenticado
         String usuarioId = authUtils.getCurrentUserId();
-        Usuario usuario = usuarioRepository.findById(usuarioId)
+        Usuario usuario = usuarioRepository.findByEmail(usuarioId)
                 .orElseThrow(() -> new RuntimeException("Usuario no encontrado"));
 
         // Verificar que el fondo existe y está activo
@@ -92,7 +92,7 @@ public class SuscripcionService {
     @Transactional
     public Inversion cancelarSuscripcion(String inversionId) {
         String usuarioId = authUtils.getCurrentUserId();
-        Inversion inversion = inversionRepository.findByIdAndUsuarioId(inversionId, usuarioId)
+        Inversion inversion = inversionRepository.findByIdAndUsuarioEmail(inversionId, usuarioId)
                 .orElseThrow(() -> new RuntimeException("Inversión no encontrada"));
 
         // Solo se pueden cancelar inversiones activas o solicitadas
