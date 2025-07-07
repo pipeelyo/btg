@@ -1,0 +1,205 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudFormation template for deploying BTG Spring Boot application on AWS Elastic Beanstalk'
+
+Parameters:
+  EnvironmentName:
+    Description: Environment name (e.g., dev, staging, prod)
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+  ApplicationName:
+    Description: Application name
+    Type: String
+  InstanceType:
+    Description: EC2 instance type
+    Type: String
+    Default: t3.micro
+    AllowedValues: [t2.micro, t3.micro, t3.small, t3.medium]
+    ConstraintDescription: must be a valid EC2 instance type.
+  KeyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instances
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: must be the name of an existing EC2 KeyPair.
+
+Mappings:
+  AWSInstanceType2Arch:
+    t3:
+      Arch: HVM64
+    t3a:
+      Arch: HVM64
+  AWSRegionArch2AMI:
+    us-east-1:
+      HVM64: ami-0c7217cdde317cfec
+    us-east-2:
+      HVM64: ami-0a695f0d95cefc163  # Amazon Linux 2023 AMI for us-east-2
+    us-west-2:
+      HVM64: ami-0f1a5f5ada8e7f8e7
+
+  # Subnet configuration for different environments
+  SubnetConfig:
+    dev:
+      VpcId: vpc-0b5a2b3c4d5e6f789  # Reemplaza con el ID de tu VPC por defecto
+      SubnetA: subnet-0123456789abcdef0  # Reemplaza con tu subnet pública 1
+      SubnetB: subnet-0123456789abcdef1  # Reemplaza con tu subnet pública 2
+    staging:
+      VpcId: vpc-0b5a2b3c4d5e6f789
+      SubnetA: subnet-0123456789abcdef0
+      SubnetB: subnet-0123456789abcdef1
+    prod:
+      VpcId: vpc-0b5a2b3c4d5e6f789
+      SubnetA: subnet-0123456789abcdef0
+      SubnetB: subnet-0123456789abcdef1
+
+Conditions:
+  IsProd: !Equals [!Ref EnvironmentName, 'prod']
+
+Resources:
+  # IAM Role for EC2 instances
+  WebServerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [ec2.amazonaws.com]
+            Action: ['sts:AssumeRole']
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSElasticBeanstalkWebTier
+        - arn:aws:iam::aws:policy/AWSElasticBeanstalkMulticontainerDocker
+        - arn:aws:iam::aws:policy/AWSElasticBeanstalkWorkerTier
+
+  WebServerInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles: [!Ref WebServerRole]
+
+  # Security Group for Elastic Beanstalk instances
+  WebServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group for BTG web servers
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+
+  # RDS Security Group
+  DBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group for RDS DB Instance
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: 0.0.0.0/0  # WARNING: In production, restrict this to your application's security group
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-db-sg
+
+  # RDS Database Subnet Group
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for RDS DB Instance
+      SubnetIds:
+        - !Ref SubnetA
+        - !Ref SubnetB
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-subnet-group
+
+  # RDS Database
+  DBInstance:
+    Type: AWS::RDS::DBInstance
+    DependsOn: DBSecurityGroup
+    Properties:
+      DBName: !Ref DBName
+      Engine: postgres
+      EngineVersion: '14.7'
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: '20'
+      StorageType: gp2
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups:
+        - !GetAtt DBSecurityGroup.GroupId
+      MultiAZ: !Ref MultiAZDatabase
+      PubliclyAccessible: true  # Set to false and use VPC peering in production
+      BackupRetentionPeriod: !If [IsProd, 35, 7]
+      DeletionPolicy: Snapshot
+      UpdateReplacePolicy: Snapshot
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-db
+
+  # Elastic Beanstalk Application
+  Application:
+    Type: AWS::ElasticBeanstalk::Application
+    Properties:
+      ApplicationName: !Ref ApplicationName
+      Description: BTG Application
+
+  # Elastic Beanstalk Environment
+  Environment:
+    Type: AWS::ElasticBeanstalk::Environment
+    DependsOn: DBInstance
+    Properties:
+      ApplicationName: !Ref Application
+      EnvironmentName: !Sub ${EnvironmentName}-${ApplicationName}
+      SolutionStackName: '64bit Amazon Linux 2023 v4.3.2 running Corretto 21'
+      OptionSettings:
+        - Namespace: aws:autoscaling:launchconfiguration
+          OptionName: IamInstanceProfile
+          Value: !Ref WebServerInstanceProfile
+        - Namespace: aws:autoscaling:launchconfiguration
+          OptionName: InstanceType
+          Value: !Ref InstanceType
+        - Namespace: aws:autoscaling:launchconfiguration
+          OptionName: EC2KeyName
+          Value: !Ref KeyName
+        - Namespace: aws:autoscaling:asg
+          OptionName: MinSize
+          Value: '1'
+        - Namespace: aws:autoscaling:asg
+          OptionName: MaxSize
+          Value: !If [IsProd, '4', '2']
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: SPRING_DATASOURCE_URL
+          Value: !Sub 'jdbc:postgresql://${DBInstance.Endpoint.Address}:${DBInstance.Endpoint.Port}/${DBName}'
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: SPRING_DATASOURCE_USERNAME
+          Value: !Ref DBUsername
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: SPRING_DATASOURCE_PASSWORD
+          Value: !Ref DBPassword
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: SPRING_PROFILES_ACTIVE
+          Value: !Ref EnvironmentName
+        - Namespace: aws:elasticbeanstalk:environment
+          OptionName: EnvironmentType
+          Value: LoadBalanced
+        - Namespace: aws:elasticbeanstalk:environment
+          OptionName: ServiceRole
+          Value: aws-elasticbeanstalk-service-role
+
+Outputs:
+  WebsiteURL:
+    Description: URL of the website
+    Value: !Sub 'http://${Environment.EndpointURL}'
+  RDSEndpoint:
+    Description: RDS Endpoint
+    Value: !GetAtt DBInstance.Endpoint.Address
+  RDSInstance:
+    Description: RDS Instance Identifier
+    Value: !Ref DBInstance

@@ -1,0 +1,147 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Simplified CloudFormation template for BTG Spring Boot application with MongoDB Atlas'
+
+Parameters:
+  EnvironmentName:
+    Description: Environment name (e.g., dev, staging, prod)
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+  ApplicationName:
+    Description: Application name
+    Type: String
+    Default: btg-app
+  InstanceType:
+    Description: EC2 instance type
+    Type: String
+    Default: t3.micro
+    AllowedValues: [t2.micro, t3.micro, t3.small, t3.medium]
+    ConstraintDescription: must be a valid EC2 instance type.
+  KeyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instances
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: must be the name of an existing EC2 KeyPair.
+  S3Bucket:
+    Description: S3 bucket containing the application version to deploy
+    Type: String
+  S3Key:
+    Description: S3 key of the application version to deploy
+    Type: String
+
+Mappings:
+  AWSInstanceType2Arch:
+    t3:
+      Arch: HVM64
+    t3a:
+      Arch: HVM64
+  AWSRegionArch2AMI:
+    us-east-1:
+      HVM64: ami-0c7217cdde317cfec
+    us-east-2:
+      HVM64: ami-0a695f0d95cefc163  # Amazon Linux 2023 AMI for us-east-2
+    us-west-2:
+      HVM64: ami-0f1a5f5ada8e7f8e7
+
+Resources:
+  # IAM Role for EC2 instances
+  WebServerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [ec2.amazonaws.com]
+            Action: ['sts:AssumeRole']
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSElasticBeanstalkWebTier
+        - arn:aws:iam::aws:policy/AWSElasticBeanstalkMulticontainerDocker
+        - arn:aws:iam::aws:policy/AWSElasticBeanstalkWorkerTier
+
+  WebServerInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles: [!Ref WebServerRole]
+
+  # Security Group for Elastic Beanstalk instances
+  WebServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group for BTG web servers
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+
+  # Elastic Beanstalk Application
+  Application:
+    Type: AWS::ElasticBeanstalk::Application
+    Properties:
+      ApplicationName: !Ref ApplicationName
+      Description: BTG Application
+
+  # Elastic Beanstalk Environment
+  Environment:
+    Type: AWS::ElasticBeanstalk::Environment
+    Properties:
+      ApplicationName: !Ref Application
+      EnvironmentName: !Sub ${EnvironmentName}-${ApplicationName}
+      SolutionStackName: '64bit Amazon Linux 2023 v4.6.0 running Corretto 21'
+      OptionSettings:
+        - Namespace: aws:autoscaling:launchconfiguration
+          OptionName: IamInstanceProfile
+          Value: !Ref WebServerInstanceProfile
+        - Namespace: aws:autoscaling:launchconfiguration
+          OptionName: InstanceType
+          Value: !Ref InstanceType
+        - Namespace: aws:autoscaling:launchconfiguration
+          OptionName: EC2KeyName
+          Value: !Ref KeyName
+        - Namespace: aws:autoscaling:asg
+          OptionName: MinSize
+          Value: '1'
+        - Namespace: aws:autoscaling:asg
+          OptionName: MaxSize
+          Value: '2'
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: SPRING_PROFILES_ACTIVE
+          Value: !Ref EnvironmentName
+        - Namespace: aws:elasticbeanstalk:environment
+          OptionName: EnvironmentType
+          Value: LoadBalanced
+        - Namespace: aws:elasticbeanstalk:environment
+          OptionName: ServiceRole
+          Value: aws-elasticbeanstalk-service-role
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: MONGODB_URI
+          Value: mongodb+srv://andresGarcia:Emilse2310!@cluster0.fuxl3.mongodb.net/btg
+      VersionLabel: !Ref ApplicationVersion
+
+  # Application Version
+  ApplicationVersion:
+    Type: AWS::ElasticBeanstalk::ApplicationVersion
+    Properties:
+      ApplicationName: !Ref Application
+      Description: Application version 1.0
+      SourceBundle:
+        S3Bucket: !Sub '${S3Bucket}'
+        S3Key: !Sub '${S3Key}'
+
+Outputs:
+  WebsiteURL:
+    Description: URL of the website
+    Value: !Sub 'http://${Environment.EndpointURL}'
+  EnvironmentName:
+    Description: Environment name
+    Value: !Ref Environment
+  ApplicationURL:
+    Description: URL of the application
+    Value: !Sub 'http://${Environment.EndpointURL}'
