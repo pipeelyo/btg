@@ -55,8 +55,20 @@ public class UsuarioService implements UserDetailsService {
         return usuarioRepository.save(usuario);
     }
 
-    public List<Usuario> obtenerTodosLosUsuarios() {
+    public List<Usuario> listarUsuarios() {
         return usuarioRepository.findAll();
+    }
+    
+    public List<Usuario> buscarPorNombre(String nombre) {
+        return usuarioRepository.findByNombreContainingIgnoreCase(nombre);
+    }
+    
+    public List<Usuario> buscarPorEmail(String email) {
+        return usuarioRepository.findByEmailContainingIgnoreCase(email);
+    }
+    
+    public List<Usuario> buscarPorRol(Usuario.Rol rol) {
+        return usuarioRepository.findByRolesContaining(rol);
     }
 
     public Usuario obtenerUsuarioPorId(String id) {
